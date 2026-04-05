@@ -1,0 +1,908 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Propify — London Real Estate</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script src="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.js"></script>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5/dist/maplibre-gl.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=Playfair+Display:wght@500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --rail: 58px;
+      --panel-w: 316px;
+      --accent: #2563eb;
+      --accent-lt: #eff6ff;
+      --surface: #fff;
+      --surface2: #f8fafc;
+      --border: rgba(0,0,0,0.08);
+      --text: #0f172a;
+      --text2: #64748b;
+      --rail-bg: #0c1220;
+      --shadow-lg: 0 8px 40px rgba(0,0,0,0.18);
+    }
+    html,body { height:100%; font-family:'DM Sans',sans-serif; background:var(--rail-bg); overflow:hidden; }
+    #map { position:absolute; inset:0; }
+
+    /* RAIL */
+    #rail {
+      position:fixed; left:0; top:0; bottom:0; width:var(--rail);
+      background:var(--rail-bg); display:flex; flex-direction:column; align-items:center;
+      z-index:300; padding-bottom:14px; border-right:1px solid rgba(255,255,255,0.05);
+    }
+    #logo-btn {
+      width:var(--rail); height:58px; min-height:58px;
+      display:flex; align-items:center; justify-content:center;
+      border-bottom:1px solid rgba(255,255,255,0.05);
+      margin-bottom:6px; cursor:pointer; text-decoration:none; transition:opacity .15s;
+    }
+    #logo-btn:hover { opacity:.75; }
+    .rail-group { display:flex; flex-direction:column; align-items:center; gap:3px; flex:1; padding-top:2px; }
+    .rail-bottom { display:flex; flex-direction:column; align-items:center; gap:3px; }
+    .rail-btn {
+      width:42px; height:42px; border-radius:13px; border:none;
+      background:transparent; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      position:relative; transition:all .15s; color:rgba(255,255,255,0.38);
+    }
+    .rail-btn:hover { background:rgba(255,255,255,0.07); color:rgba(255,255,255,0.82); }
+    .rail-btn.active { background:rgba(37,99,235,0.22); color:#60a5fa; }
+    .rail-btn svg { width:19px; height:19px; flex-shrink:0; }
+    .filter-dot {
+      position:absolute; top:6px; right:6px; width:7px; height:7px; border-radius:50%;
+      background:#f59e0b; border:2px solid var(--rail-bg); display:none;
+    }
+    .filter-dot.show { display:block; }
+    /* AI rail breathe */
+    .rail-btn.ai-rail { color:rgba(167,139,250,0.55); }
+    .rail-btn.ai-rail:hover { color:#a78bfa; background:rgba(124,58,237,0.15); }
+    .rail-btn.ai-rail.active { background:rgba(124,58,237,0.22); color:#c4b5fd; }
+    @keyframes ai-breathe { 0%,100%{color:rgba(167,139,250,0.45)} 50%{color:rgba(196,181,253,0.9)} }
+    .rail-btn.ai-rail:not(.active):not(:hover) { animation:ai-breathe 2.8s ease-in-out infinite; }
+
+    /* PANELS */
+    .side-panel {
+      position:fixed; top:0; bottom:0; left:var(--rail); width:var(--panel-w);
+      background:var(--surface); z-index:200; display:flex; flex-direction:column;
+      transform:translateX(calc(-100% - var(--rail)));
+      transition:transform .36s cubic-bezier(0.32,0.72,0,1);
+      box-shadow:var(--shadow-lg);
+    }
+    .side-panel.open { transform:translateX(0); }
+    .panel-head {
+      padding:17px 17px 13px; border-bottom:1px solid var(--border);
+      display:flex; align-items:center; justify-content:space-between; flex-shrink:0;
+    }
+    .panel-head h2 { font-size:15px; font-weight:600; color:var(--text); }
+    .panel-close {
+      width:26px; height:26px; border-radius:8px; border:1px solid var(--border);
+      background:var(--surface2); cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      color:var(--text2); font-size:11px; transition:background .1s; flex-shrink:0;
+    }
+    .panel-close:hover { background:#f1f5f9; }
+    .panel-body { flex:1; overflow-y:auto; padding:16px; }
+    .panel-body::-webkit-scrollbar { width:3px; }
+    .panel-body::-webkit-scrollbar-thumb { background:#e2e8f0; border-radius:2px; }
+    .panel-footer { padding:13px 16px; border-top:1px solid var(--border); display:flex; gap:9px; flex-shrink:0; }
+
+    /* FILTER */
+    .sec-lbl { font-size:10px; font-weight:600; letter-spacing:.09em; color:var(--text2); text-transform:uppercase; margin-bottom:9px; }
+    .fsec { margin-bottom:20px; }
+    .type-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:7px; }
+    .type-chip {
+      border:1px solid var(--border); border-radius:11px; padding:9px 4px 8px; cursor:pointer;
+      display:flex; flex-direction:column; align-items:center; gap:5px;
+      transition:all .14s; background:var(--surface2);
+    }
+    .type-chip:hover { border-color:var(--accent); background:#f0f6ff; }
+    .type-chip.on { border-color:var(--accent); background:var(--accent-lt); }
+    .type-chip .ci { width:26px; height:26px; color:var(--text2); }
+    .type-chip.on .ci { color:var(--accent); }
+    .type-chip span { font-size:10px; font-weight:500; color:var(--text2); text-align:center; line-height:1.2; }
+    .type-chip.on span { color:var(--accent); }
+
+    /* Range */
+    .range-area { position:relative; height:28px; margin:0 1px; }
+    .range-track { position:absolute; top:12px; left:0; right:0; height:4px; background:#e2e8f0; border-radius:2px; pointer-events:none; }
+    .range-fill { position:absolute; height:100%; background:var(--accent); border-radius:2px; }
+    .range-area input[type=range] {
+      position:absolute; top:0; left:0; width:100%; height:28px; margin:0; padding:0;
+      -webkit-appearance:none; appearance:none; background:transparent; cursor:pointer;
+    }
+    .range-area input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance:none; width:17px; height:17px; border-radius:50%;
+      background:white; border:2.5px solid var(--accent); box-shadow:0 1px 4px rgba(0,0,0,.18); margin-top:-6.5px;
+    }
+    .range-area input[type=range]::-webkit-slider-runnable-track { background:transparent; height:4px; margin-top:12px; }
+    .rl-row { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px; }
+    .rl-val { font-size:13px; font-weight:600; color:var(--text); }
+    .rl-sub { font-size:11px; color:var(--text2); }
+
+    /* Num chips */
+    .num-chips { display:flex; gap:5px; flex-wrap:wrap; }
+    .num-chip {
+      min-width:36px; height:33px; padding:0 9px; border-radius:9px;
+      border:1px solid var(--border); background:var(--surface2);
+      display:flex; align-items:center; justify-content:center;
+      font-size:13px; font-weight:500; cursor:pointer; transition:all .14s; color:var(--text);
+    }
+    .num-chip:hover { border-color:var(--accent); }
+    .num-chip.on { border-color:var(--accent); background:var(--accent-lt); color:var(--accent); }
+
+    /* Btns */
+    .btn-primary {
+      flex:1; padding:11px; border-radius:11px; border:none;
+      background:var(--accent); color:white; font-size:13px; font-weight:600;
+      cursor:pointer; font-family:inherit; transition:background .15s;
+    }
+    .btn-primary:hover { background:#1d4ed8; }
+    .btn-ghost {
+      flex:1; padding:11px; border-radius:11px; border:1px solid var(--border);
+      background:var(--surface2); color:var(--text2); font-size:13px; font-weight:500;
+      cursor:pointer; font-family:inherit; transition:background .15s;
+    }
+    .btn-ghost:hover { background:#f1f5f9; }
+
+    /* TILT */
+    #tilt-ctrl {
+      position:fixed; right:14px; bottom:110px; z-index:250;
+      display:flex; flex-direction:column; gap:2px;
+    }
+    .tilt-btn {
+      width:30px; height:30px; border-radius:8px; background:white;
+      border:1px solid rgba(0,0,0,.11); box-shadow:0 1px 4px rgba(0,0,0,.12);
+      display:flex; align-items:center; justify-content:center;
+      cursor:pointer; color:#374151; transition:background .1s; user-select:none;
+    }
+    .tilt-btn:hover { background:#f1f5f9; }
+    .tilt-btn svg { width:14px; height:14px; }
+
+    /* AI PANEL */
+    #ai-panel { background:#0c1220; }
+    #ai-panel .panel-head { background:#0c1220; border-color:rgba(255,255,255,0.07); }
+    #ai-panel .panel-head h2 { color:white; display:flex; align-items:center; gap:8px; }
+    #ai-panel .panel-close { background:rgba(255,255,255,.07); border-color:rgba(255,255,255,.1); color:rgba(255,255,255,.5); }
+    #ai-panel .panel-close:hover { background:rgba(255,255,255,.14); }
+    #ai-panel .panel-body { background:#0c1220; padding:13px; }
+    #ai-panel .panel-footer { background:#0c1220; border-color:rgba(255,255,255,.07); padding:11px 13px; }
+
+    .ai-orb-sm {
+      width:24px; height:24px; border-radius:8px; flex-shrink:0;
+      background:linear-gradient(135deg,#7c3aed,#2563eb);
+      display:flex; align-items:center; justify-content:center; position:relative;
+    }
+    @keyframes orb-ring { 0%{box-shadow:0 0 0 0 rgba(124,58,237,.6);opacity:1} 70%{box-shadow:0 0 0 7px rgba(124,58,237,0);opacity:0} 100%{opacity:0} }
+    .ai-orb-sm::after { content:''; position:absolute; inset:-1px; border-radius:9px; animation:orb-ring 2.2s ease-out infinite; }
+
+    .ai-welcome { display:flex; flex-direction:column; align-items:center; padding:26px 10px 14px; gap:10px; text-align:center; }
+    .ai-big-orb {
+      width:54px; height:54px; border-radius:17px; flex-shrink:0;
+      background:linear-gradient(135deg,#7c3aed,#2563eb);
+      display:flex; align-items:center; justify-content:center;
+    }
+    @keyframes big-pulse { 0%,100%{box-shadow:0 0 0 0 rgba(124,58,237,.5)} 50%{box-shadow:0 0 0 12px rgba(124,58,237,0)} }
+    .ai-big-orb { animation:big-pulse 2.5s ease-in-out infinite; }
+    .ai-welcome strong { font-size:14px; color:white; font-weight:600; }
+    .ai-welcome p { font-size:12px; color:rgba(255,255,255,.42); line-height:1.6; max-width:210px; }
+    .ai-sugs { display:flex; flex-direction:column; gap:5px; width:100%; margin-top:4px; }
+    .ai-sug {
+      background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.07);
+      border-radius:9px; padding:8px 11px; color:rgba(255,255,255,.65);
+      font-size:12px; cursor:pointer; text-align:left; font-family:inherit; transition:all .13s;
+    }
+    .ai-sug:hover { background:rgba(255,255,255,.1); color:white; border-color:rgba(124,58,237,.4); }
+
+    #ai-msgs { display:flex; flex-direction:column; gap:9px; }
+    .mb { max-width:88%; padding:9px 12px; border-radius:13px; font-size:12.5px; line-height:1.55; }
+    .mb-u { align-self:flex-end; background:#2563eb; color:white; border-radius:13px 13px 3px 13px; }
+    .mb-a { align-self:flex-start; background:rgba(255,255,255,.08); color:rgba(255,255,255,.85); border-radius:13px 13px 13px 3px; }
+
+    .ai-inp-row { display:flex; gap:7px; width:100%; }
+    .ai-inp {
+      flex:1; background:rgba(255,255,255,.07); border:1px solid rgba(255,255,255,.1);
+      border-radius:11px; padding:9px 13px; color:white; font-size:13px; font-family:inherit;
+      outline:none; transition:border-color .15s;
+    }
+    .ai-inp::placeholder { color:rgba(255,255,255,.3); }
+    .ai-inp:focus { border-color:rgba(124,58,237,.5); }
+    .ai-send-btn {
+      width:36px; height:36px; border-radius:10px; flex-shrink:0;
+      background:linear-gradient(135deg,#7c3aed,#2563eb); border:none;
+      display:flex; align-items:center; justify-content:center; cursor:pointer; transition:opacity .15s;
+    }
+    .ai-send-btn:hover { opacity:.82; }
+    .ai-send-btn svg { width:15px; height:15px; }
+
+    .tdot { display:inline-block; width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,.42); margin:0 2px; animation:dot-b 1.2s infinite ease-in-out; }
+    .tdot:nth-child(2){animation-delay:.18s} .tdot:nth-child(3){animation-delay:.36s}
+    @keyframes dot-b { 0%,80%,100%{transform:scale(0.6);opacity:.3} 40%{transform:scale(1);opacity:1} }
+
+    /* CONTACT */
+    .ci-card {
+      background:linear-gradient(135deg,#0f172a,#1e1b4b);
+      border-radius:13px; padding:15px; margin-bottom:17px; display:flex; flex-direction:column; gap:11px;
+    }
+    .ci-row { display:flex; align-items:center; gap:10px; text-decoration:none; transition:opacity .15s; }
+    .ci-row:hover { opacity:.72; }
+    .ci-ico { width:30px; height:30px; border-radius:9px; background:rgba(255,255,255,.1); display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+    .ci-ico svg { width:14px; height:14px; color:white; }
+    .ci-lbl { font-size:10px; color:rgba(255,255,255,.4); text-transform:uppercase; letter-spacing:.07em; }
+    .ci-val { font-size:13px; color:white; font-weight:500; }
+    .f-lbl { font-size:10px; font-weight:600; color:var(--text2); text-transform:uppercase; letter-spacing:.07em; margin-bottom:5px; }
+    .f-inp {
+      width:100%; padding:9px 11px; border:1px solid var(--border);
+      border-radius:9px; font-size:13px; font-family:inherit;
+      background:var(--surface2); outline:none; color:var(--text); transition:border-color .15s;
+    }
+    .f-inp:focus { border-color:var(--accent); background:white; }
+    textarea.f-inp { resize:vertical; min-height:78px; }
+
+    /* POPUP */
+    .maplibregl-popup-content { border-radius:18px !important; padding:0 !important; overflow:hidden; box-shadow:0 10px 40px rgba(0,0,0,.22) !important; border:none !important; width:268px !important; }
+    .maplibregl-popup-tip { display:none !important; }
+    .maplibregl-popup-close-button { display:none !important; }
+    .maplibregl-ctrl-attrib { display:none; }
+    .prop-pop { font-family:'DM Sans',sans-serif; }
+    .pp-img { width:100%; height:148px; object-fit:cover; display:block; }
+    .pp-img-wrap { position:relative; }
+    .pp-badge {
+      position:absolute; top:9px; left:9px; background:white; border-radius:7px;
+      padding:3px 8px; font-size:10px; font-weight:600; color:var(--text);
+      box-shadow:0 2px 8px rgba(0,0,0,.15);
+    }
+    .pp-body { padding:12px 13px 14px; }
+    .pp-price { font-family:'Playfair Display',serif; font-size:21px; font-weight:600; color:var(--text); margin-bottom:5px; }
+    .pp-chips { display:flex; gap:5px; flex-wrap:wrap; margin-bottom:6px; }
+    .pp-chip {
+      background:var(--surface2); border:1px solid var(--border); border-radius:7px;
+      padding:3px 7px; font-size:11px; color:var(--text2); display:flex; align-items:center; gap:4px;
+    }
+    .pp-chip svg { width:11px; height:11px; }
+    .pp-addr { font-size:12px; color:var(--text2); line-height:1.45; }
+
+    /* LOADING */
+    #loading-scr {
+      position:fixed; inset:0; background:#0c1220;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      z-index:9999; transition:opacity .6s ease;
+    }
+    #loading-scr.out { opacity:0; pointer-events:none; }
+    .ld-logo { display:flex; align-items:center; gap:10px; margin-bottom:26px; }
+    .ld-logo span { font-family:'Playfair Display',serif; font-size:21px; color:white; letter-spacing:-.5px; }
+    .ld-bar-wrap { width:176px; height:3px; background:rgba(255,255,255,.08); border-radius:2px; overflow:hidden; }
+    .ld-bar { height:100%; width:0; background:linear-gradient(90deg,#7c3aed,#2563eb); border-radius:2px; animation:ld-p 2.4s ease-out forwards; }
+    @keyframes ld-p { 0%{width:0} 30%{width:38%} 70%{width:74%} 100%{width:100%} }
+    .ld-txt { margin-top:12px; font-size:11px; color:rgba(255,255,255,.26); letter-spacing:.12em; text-transform:uppercase; }
+
+    /* MAP CTRL */
+    .maplibregl-ctrl-group { border-radius:11px !important; overflow:hidden; box-shadow:0 2px 8px rgba(0,0,0,.12) !important; border:1px solid rgba(0,0,0,.09) !important; }
+    .maplibregl-ctrl-group button { border-radius:0 !important; }
+  </style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading-scr">
+  <div class="ld-logo">
+    <svg width="30" height="30" viewBox="0 0 30 30" fill="none">
+      <rect width="30" height="30" rx="8" fill="url(#ldg)"/>
+      <path d="M15 5L6 11.5V25h6v-8h6v8h6V11.5L15 5z" fill="white"/>
+      <defs><linearGradient id="ldg" x1="0" y1="0" x2="30" y2="30"><stop stop-color="#7c3aed"/><stop offset="1" stop-color="#2563eb"/></linearGradient></defs>
+    </svg>
+    <span>Propify</span>
+  </div>
+  <div class="ld-bar-wrap"><div class="ld-bar"></div></div>
+  <p class="ld-txt">Loading London properties…</p>
+</div>
+
+<div id="map"></div>
+
+<!-- Rail -->
+<nav id="rail">
+  <a id="logo-btn" href="https://zerodev.tech" target="_blank" rel="noopener" title="ZeroDev Technologies">
+    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+      <rect width="28" height="28" rx="7" fill="url(#rg)"/>
+      <path d="M14 4L5 10.5V24h6.5v-8h5V24H23V10.5L14 4z" fill="white"/>
+      <defs><linearGradient id="rg" x1="0" y1="0" x2="28" y2="28"><stop stop-color="#a78bfa"/><stop offset="1" stop-color="#60a5fa"/></linearGradient></defs>
+    </svg>
+  </a>
+
+  <div class="rail-group">
+    <button class="rail-btn" id="rail-filter" data-panel="filter-panel" title="Filters">
+      <svg id="filter-svg" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M3 5h14M5.5 10h9M8 15h4"/>
+      </svg>
+      <span class="filter-dot" id="fdot"></span>
+    </button>
+    <button class="rail-btn" id="rail-search" data-panel="search-panel" title="Search areas">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="9" cy="9" r="6"/><path d="m16 16-3.5-3.5"/>
+      </svg>
+    </button>
+    <button class="rail-btn ai-rail" id="rail-ai" data-panel="ai-panel" title="AI Assistant">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M10 3a4 4 0 1 1 0 8 4 4 0 0 1 0-8zM4 17c0-3 2.7-5 6-5s6 2 6 5"/>
+        <path d="M15.5 6l1.5-1.5M2.5 5 4 6.5M15.5 14l1.5 1.5M2.5 15.5 4 14"/>
+      </svg>
+    </button>
+  </div>
+
+  <div class="rail-bottom">
+    <button class="rail-btn" id="rail-contact" data-panel="contact-panel" title="Contact us">
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="4" width="16" height="12" rx="2"/><path d="m2 4 8 8 8-8"/>
+      </svg>
+    </button>
+  </div>
+</nav>
+
+<!-- Tilt control -->
+<div id="tilt-ctrl">
+  <button class="tilt-btn" id="tilt-up" title="Tilt up">
+    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 10L7 5l5 5"/></svg>
+  </button>
+  <button class="tilt-btn" id="tilt-dn" title="Tilt down">
+    <svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 4l5 5 5-5"/></svg>
+  </button>
+</div>
+
+<!-- Filter Panel -->
+<div class="side-panel" id="filter-panel">
+  <div class="panel-head">
+    <h2>Filters</h2>
+    <button class="panel-close" data-close="filter-panel">✕</button>
+  </div>
+  <div class="panel-body">
+    <div class="fsec">
+      <div class="sec-lbl">Property Type</div>
+      <div class="type-grid" id="type-chips"></div>
+    </div>
+    <div class="fsec">
+      <div class="sec-lbl">Budget</div>
+      <div class="rl-row">
+        <span class="rl-sub" id="minP-lbl">£0</span>
+        <span class="rl-val" id="budget-lbl">Any price</span>
+        <span class="rl-sub" id="maxP-lbl">£5M+</span>
+      </div>
+      <div class="range-area">
+        <div class="range-track"><div class="range-fill" id="p-fill"></div></div>
+        <input type="range" id="min-price" min="0" max="5000000" step="25000" value="0">
+        <input type="range" id="max-price" min="0" max="5000000" step="25000" value="5000000">
+      </div>
+    </div>
+    <div class="fsec">
+      <div class="sec-lbl">Size (sq ft)</div>
+      <div class="rl-row">
+        <span class="rl-sub" id="minS-lbl">0</span>
+        <span class="rl-val" id="size-lbl">Any size</span>
+        <span class="rl-sub" id="maxS-lbl">10k ft²</span>
+      </div>
+      <div class="range-area">
+        <div class="range-track"><div class="range-fill" id="s-fill"></div></div>
+        <input type="range" id="min-size" min="0" max="10000" step="100" value="0">
+        <input type="range" id="max-size" min="0" max="10000" step="100" value="10000">
+      </div>
+    </div>
+    <div class="fsec">
+      <div class="sec-lbl">Bedrooms</div>
+      <div class="num-chips" id="bed-chips"></div>
+    </div>
+    <div class="fsec" style="margin-bottom:0">
+      <div class="sec-lbl">Bathrooms</div>
+      <div class="num-chips" id="bath-chips"></div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <button class="btn-ghost" id="reset-btn">Reset all</button>
+    <button class="btn-primary" id="apply-btn">Show results</button>
+  </div>
+</div>
+
+<!-- Search Panel -->
+<div class="side-panel" id="search-panel">
+  <div class="panel-head">
+    <h2>Search areas</h2>
+    <button class="panel-close" data-close="search-panel">✕</button>
+  </div>
+  <div class="panel-body">
+    <input class="f-inp" type="text" placeholder="Area, postcode or address…" style="width:100%;margin-bottom:16px;">
+    <div class="sec-lbl">Popular areas</div>
+    <div style="margin-top:8px;" id="area-list"></div>
+  </div>
+</div>
+
+<!-- AI Panel -->
+<div class="side-panel" id="ai-panel">
+  <div class="panel-head">
+    <h2>
+      <div class="ai-orb-sm">
+        <svg viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="1.7" style="width:12px;height:12px;">
+          <circle cx="8" cy="6" r="2.5"/><path d="M4 13c0-2.2 1.8-4 4-4s4 1.8 4 4"/>
+          <path d="M13 2.5l1-1M2 2.5 1 1.5M13 10.5l1 1M2 10.5l-1 1"/>
+        </svg>
+      </div>
+      Propify AI
+    </h2>
+    <button class="panel-close" data-close="ai-panel" style="background:rgba(255,255,255,.07);border-color:rgba(255,255,255,.1);color:rgba(255,255,255,.5);">✕</button>
+  </div>
+  <div class="panel-body" id="ai-body">
+    <div class="ai-welcome" id="ai-welcome">
+      <div class="ai-big-orb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width:26px;height:26px;">
+          <circle cx="12" cy="9" r="3.5"/><path d="M6 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/>
+          <path d="M19 3.5l1.5-1.5M4 3.5 2.5 2M19 15l1.5 1.5M4 15l-1.5 1.5"/>
+        </svg>
+      </div>
+      <strong>Propify AI</strong>
+      <p>Ask me anything about London properties. I can filter the map, compare areas, and give insights.</p>
+      <div class="ai-sugs">
+        <button class="ai-sug" onclick="quickPrompt(this)">Show 2-bed flats under £600k in Zone 1</button>
+        <button class="ai-sug" onclick="quickPrompt(this)">Best value areas in East London?</button>
+        <button class="ai-sug" onclick="quickPrompt(this)">Houses with 4+ beds under £1.2M</button>
+      </div>
+    </div>
+    <div id="ai-msgs"></div>
+  </div>
+  <div class="panel-footer" style="background:#0c1220;border-color:rgba(255,255,255,.07);padding:11px 13px;">
+    <div class="ai-inp-row">
+      <input class="ai-inp" id="ai-inp" type="text" placeholder="Ask about properties…">
+      <button class="ai-send-btn" id="ai-send">
+        <svg viewBox="0 0 16 16" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M2 8h12M10 4l4 4-4 4"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Contact Panel -->
+<div class="side-panel" id="contact-panel">
+  <div class="panel-head">
+    <h2>Get in touch</h2>
+    <button class="panel-close" data-close="contact-panel">✕</button>
+  </div>
+  <div class="panel-body">
+    <div class="ci-card">
+      <a class="ci-row" href="https://zerodev.tech" target="_blank" rel="noopener">
+        <div class="ci-ico">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+            <circle cx="8" cy="8" r="6.5"/><path d="M8 1.5c-2 2-3 3.5-3 6.5s1 4.5 3 6.5"/><path d="M8 1.5c2 2 3 3.5 3 6.5s-1 4.5-3 6.5"/><path d="M1.5 8h13"/>
+          </svg>
+        </div>
+        <div>
+          <div class="ci-lbl">Website</div>
+          <div class="ci-val">zerodev.tech</div>
+        </div>
+      </a>
+      <a class="ci-row" href="https://linkedin.com/in/yourprofile" target="_blank" rel="noopener">
+        <div class="ci-ico">
+          <svg viewBox="0 0 16 16" fill="white" style="width:14px;height:14px;">
+            <path d="M0 1.146C0 .513.526 0 1.175 0h13.65C15.474 0 16 .513 16 1.146v13.708c0 .633-.526 1.146-1.175 1.146H1.175C.526 16 0 15.487 0 14.854zm4.943 12.248V6.169H2.542v7.225zm-1.2-8.212c.837 0 1.358-.554 1.358-1.248-.015-.709-.52-1.248-1.342-1.248S2.4 3.226 2.4 3.934c0 .694.521 1.248 1.327 1.248zm4.908 8.212V9.359c0-.216.016-.432.08-.586.173-.431.568-.878 1.232-.878.869 0 1.216.662 1.216 1.634v3.865h2.401V9.25c0-2.22-1.184-3.252-2.764-3.252-1.274 0-1.845.7-2.165 1.193v.025h-.016l.016-.025V6.169h-2.4c.03.678 0 7.225 0 7.225z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="ci-lbl">LinkedIn</div>
+          <div class="ci-val">linkedin.com/in/yourprofile</div>
+        </div>
+      </a>
+      <a class="ci-row" href="mailto:hello@zerodev.tech">
+        <div class="ci-ico">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="1" y="3" width="14" height="10" rx="1.5"/><path d="M1 3.5 8 9l7-5.5"/>
+          </svg>
+        </div>
+        <div>
+          <div class="ci-lbl">Email</div>
+          <div class="ci-val">hello@zerodev.tech</div>
+        </div>
+      </a>
+    </div>
+    <p style="font-size:12.5px;color:var(--text2);margin-bottom:15px;line-height:1.6;">Send a message and our London property experts will reply within 24 hours.</p>
+    <div style="display:flex;flex-direction:column;gap:10px;">
+      <div><div class="f-lbl">Name</div><input class="f-inp" type="text" placeholder="Your full name"></div>
+      <div><div class="f-lbl">Email</div><input class="f-inp" type="email" placeholder="you@example.com"></div>
+      <div><div class="f-lbl">Message</div><textarea class="f-inp" placeholder="Tell us what you're looking for…"></textarea></div>
+    </div>
+  </div>
+  <div class="panel-footer">
+    <button class="btn-primary" style="flex:1" onclick="alert('Message sent! We\'ll be in touch soon.')">Send message</button>
+  </div>
+</div>
+
+<script>
+// ── IMAGES (5 high-quality Unsplash) ──
+const IMGS = [
+  'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?w=640&q=85&fit=crop',
+  'https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=640&q=85&fit=crop',
+  'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=640&q=85&fit=crop',
+  'https://images.unsplash.com/photo-1570129477492-45c003edd2be?w=640&q=85&fit=crop',
+  'https://images.unsplash.com/photo-1523217582562-09d0def993a6?w=640&q=85&fit=crop',
+];
+function pickImg(lng, lat) {
+  return IMGS[Math.abs(Math.round((lng + lat) * 1000)) % IMGS.length];
+}
+
+// ── MAP ──
+const map = new maplibregl.Map({
+  container: 'map',
+  style: './style_bright.json',
+  center: [-0.1276, 51.5072],
+  zoom: 10, pitch: 0, maxPitch: 80, attributionControl: false,
+});
+map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+
+// ── TILT BUTTONS ──
+document.getElementById('tilt-up').addEventListener('click', () =>
+  map.easeTo({ pitch: Math.min(map.getPitch() + 15, 80), duration: 350 }));
+document.getElementById('tilt-dn').addEventListener('click', () =>
+  map.easeTo({ pitch: Math.max(map.getPitch() - 15, 0), duration: 350 }));
+
+// ── PANELS ──
+let activePanel = null;
+function openPanel(id) {
+  if (activePanel && activePanel !== id) {
+    document.getElementById(activePanel)?.classList.remove('open');
+    document.querySelector(`[data-panel="${activePanel}"]`)?.classList.remove('active');
+  }
+  document.getElementById(id)?.classList.add('open');
+  document.querySelector(`[data-panel="${id}"]`)?.classList.add('active');
+  activePanel = id;
+}
+function closePanel(id) {
+  document.getElementById(id)?.classList.remove('open');
+  document.querySelector(`[data-panel="${id}"]`)?.classList.remove('active');
+  if (activePanel === id) activePanel = null;
+}
+function togglePanel(id) {
+  document.getElementById(id)?.classList.contains('open') ? closePanel(id) : openPanel(id);
+}
+document.querySelectorAll('.rail-btn[data-panel]').forEach(b => b.addEventListener('click', () => togglePanel(b.dataset.panel)));
+document.querySelectorAll('.panel-close[data-close]').forEach(b => b.addEventListener('click', () => closePanel(b.dataset.close)));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && activePanel) closePanel(activePanel); });
+
+// ── TYPE CHIPS ──
+const TYPES = [
+  ['Flat', `<svg class="ci" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="3" y="4" width="20" height="18" rx="2"/><path d="M3 11h20M3 18h20M10 11v7M16 11v7"/></svg>`],
+  ['Apartment', `<svg class="ci" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="5" y="5" width="16" height="16" rx="2"/><path d="M5 13h16M13 5v16"/><rect x="8" y="8" width="3" height="3" rx=".5" fill="currentColor" opacity=".35"/><rect x="15" y="8" width="3" height="3" rx=".5" fill="currentColor" opacity=".35"/></svg>`],
+  ['House', `<svg class="ci" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 13L13 5l9 8"/><rect x="7" y="13" width="12" height="9" rx="1"/><rect x="10" y="17" width="6" height="5" rx=".5"/></svg>`],
+  ['Terraced', `<svg class="ci" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M2 14L7 9l5 5M9 14l5-5 5 5"/><rect x="2" y="14" width="10" height="8" rx=".5"/><rect x="14" y="14" width="10" height="8" rx=".5"/></svg>`],
+  ['Semi', `<svg class="ci" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 14L9.5 8 16 14"/><rect x="3" y="14" width="13" height="8" rx=".5"/><path d="M16 14v8h7V14l-3.5-5"/></svg>`],
+  ['Other', `<svg class="ci" viewBox="0 0 26 26" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="13" cy="13" r="8.5"/><path d="M13 9v5l3 2"/></svg>`],
+];
+const tg = document.getElementById('type-chips');
+TYPES.forEach(([name, icon]) => {
+  const d = document.createElement('div');
+  d.className = 'type-chip'; d.dataset.value = name;
+  d.innerHTML = icon + `<span>${name}</span>`;
+  d.addEventListener('click', () => { d.classList.toggle('on'); syncBadge(); });
+  tg.appendChild(d);
+});
+
+// ── BED/BATH CHIPS ──
+['bed-chips','bath-chips'].forEach(cid => {
+  ['Any','1','2','3','4','5+'].forEach(v => {
+    const d = document.createElement('div');
+    d.className = 'num-chip'; d.dataset.value = v; d.textContent = v;
+    d.addEventListener('click', () => {
+      if (v === 'Any') document.querySelectorAll(`#${cid} .num-chip`).forEach(c => c.classList.remove('on'));
+      else { document.querySelector(`#${cid} [data-value="Any"]`)?.classList.remove('on'); d.classList.toggle('on'); }
+      syncBadge();
+    });
+    document.getElementById(cid).appendChild(d);
+  });
+});
+
+// ── AREA SEARCH ──
+const AREAS = {
+  'Chelsea': [-0.17,51.49], 'Shoreditch': [-0.077,51.523], 'Notting Hill': [-0.195,51.515],
+  'Canary Wharf': [-0.019,51.505], 'Hackney': [-0.058,51.545], 'Islington': [-0.102,51.536],
+  'Clapham': [-0.136,51.461], 'Mayfair': [-0.145,51.51], 'Greenwich': [-0.009,51.483], 'Brixton': [-0.113,51.463],
+};
+const al = document.getElementById('area-list');
+Object.entries(AREAS).forEach(([name, coord]) => {
+  const d = document.createElement('div');
+  d.style.cssText = 'padding:9px 10px;border-radius:9px;cursor:pointer;font-size:13px;color:var(--text);transition:background .1s;display:flex;align-items:center;gap:9px;';
+  d.innerHTML = `<svg viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" style="width:12px;height:12px;flex-shrink:0;color:var(--text2);"><path d="M7 1C4.8 1 3 2.8 3 5c0 2.5 4 8 4 8s4-5.5 4-8c0-2.2-1.8-4-4-4z"/><circle cx="7" cy="5" r="1.2" fill="currentColor"/></svg>${name}`;
+  d.addEventListener('mouseenter', () => d.style.background = 'var(--surface2)');
+  d.addEventListener('mouseleave', () => d.style.background = '');
+  d.addEventListener('click', () => { map.flyTo({ center: coord, zoom: 14 }); closePanel('search-panel'); });
+  al.appendChild(d);
+});
+
+// ── DUAL RANGE ──
+function fmtP(v) { return v>=1e6?'£'+(v/1e6).toFixed(1)+'M':v>=1e3?'£'+(v/1e3|0)+'k':'£'+v; }
+function fmtS(v) { return v>=1000?(v/1000).toFixed(1)+'k ft²':v+' ft²'; }
+
+function setupRange(minId, maxId, fillId, minLblId, maxLblId, mainLblId, isP) {
+  const minEl = document.getElementById(minId), maxEl = document.getElementById(maxId);
+  const fill = document.getElementById(fillId);
+  function upd() {
+    let lo = +minEl.value, hi = +maxEl.value;
+    const total = +maxEl.max - +minEl.min, base = +minEl.min;
+    fill.style.left = ((lo-base)/total*100)+'%';
+    fill.style.width = ((hi-lo)/total*100)+'%';
+    document.getElementById(minLblId).textContent = isP ? fmtP(lo) : fmtS(lo);
+    document.getElementById(maxLblId).textContent = isP ? fmtP(hi) : fmtS(hi);
+    const def = lo<=base && hi>=+maxEl.max;
+    document.getElementById(mainLblId).textContent = def ? (isP?'Any price':'Any size') : `${isP?fmtP(lo):fmtS(lo)} – ${isP?fmtP(hi):fmtS(hi)}`;
+    syncBadge();
+  }
+  minEl.addEventListener('input', upd); maxEl.addEventListener('input', upd); upd();
+}
+setupRange('min-price','max-price','p-fill','minP-lbl','maxP-lbl','budget-lbl', true);
+setupRange('min-size','max-size','s-fill','minS-lbl','maxS-lbl','size-lbl', false);
+
+// ── BADGE ──
+function syncBadge() {
+  const active = document.querySelectorAll('.type-chip.on,.num-chip.on').length > 0
+    || +document.getElementById('min-price').value > 0
+    || +document.getElementById('max-price').value < 5000000
+    || +document.getElementById('min-size').value > 0
+    || +document.getElementById('max-size').value < 10000;
+
+  document.getElementById('fdot').classList.toggle('show', active);
+  const svg = document.getElementById('filter-svg');
+  if (active) {
+    svg.setAttribute('stroke-width','2.2');
+    svg.style.color = '#60a5fa';
+  } else {
+    svg.setAttribute('stroke-width','1.8');
+    svg.style.color = '';
+  }
+}
+
+// ── FILTER ──
+function buildFilter() {
+  const expr = ['all'];
+  const minP = +document.getElementById('min-price').value;
+  const maxP = +document.getElementById('max-price').value;
+  const minS = +document.getElementById('min-size').value;
+  const maxS = +document.getElementById('max-size').value;
+  if (minP > 0) expr.push(['>=','price_amount',minP]);
+  if (maxP < 5000000) expr.push(['<=','price_amount',maxP]);
+  if (minS > 0) expr.push(['>=','size_sqft',minS]);
+  if (maxS < 10000) expr.push(['<=','size_sqft',maxS]);
+  const types = [...document.querySelectorAll('.type-chip.on')].map(e=>e.dataset.value);
+  if (types.length) expr.push(['in','property_sub_type',...types]);
+  const beds = [...document.querySelectorAll('#bed-chips .num-chip.on')].map(e=>e.dataset.value);
+  if (beds.length) { const a=['any']; beds.forEach(v=>a.push(v==='5+' ? ['>=','bedrooms',5] : ['==','bedrooms',+v])); expr.push(a); }
+  const baths = [...document.querySelectorAll('#bath-chips .num-chip.on')].map(e=>e.dataset.value);
+  if (baths.length) { const a=['any']; baths.forEach(v=>a.push(v==='5+' ? ['>=','bathrooms',5] : ['==','bathrooms',+v])); expr.push(a); }
+  return expr.length > 1 ? expr : null;
+}
+
+function applyFilters() {
+  const f = buildFilter();
+  // Apply to both point and price label layers (use actual layer IDs from style_bright.json)
+  ['properties-point','properties-price-label'].forEach(id => {
+    if (map.getLayer(id)) map.setFilter(id, f);
+  });
+  syncBadge(); closePanel('filter-panel');
+}
+
+function resetFilters() {
+  document.querySelectorAll('.type-chip.on,.num-chip.on').forEach(e => e.classList.remove('on'));
+  document.getElementById('min-price').value = 0; document.getElementById('max-price').value = 5000000;
+  document.getElementById('min-size').value = 0; document.getElementById('max-size').value = 10000;
+  setupRange('min-price','max-price','p-fill','minP-lbl','maxP-lbl','budget-lbl', true);
+  setupRange('min-size','max-size','s-fill','minS-lbl','maxS-lbl','size-lbl', false);
+  ['properties-point','properties-price-label'].forEach(id => { if (map.getLayer(id)) map.setFilter(id,null); });
+  syncBadge();
+}
+document.getElementById('apply-btn').addEventListener('click', applyFilters);
+document.getElementById('reset-btn').addEventListener('click', resetFilters);
+
+// ── MAP LOAD ──
+let selPopup = null;
+
+map.on('load', () => {
+
+  // Style home points
+  if (map.getLayer('properties-point')) {
+    map.setPaintProperty('properties-point','circle-color',[
+      'interpolate',['linear'],['get','price_amount'],
+      0,'#10b981', 250000,'#34d399', 500000,'#fbbf24', 800000,'#f97316', 1200000,'#ef4444', 3000000,'#9f1239'
+    ]);
+    map.setPaintProperty('properties-point','circle-radius',[
+      'interpolate',['linear'],['zoom'],
+      9,['interpolate',['linear'],['get','price_amount'],100000,3,3000000,6],
+      13,['interpolate',['linear'],['get','price_amount'],100000,6,3000000,11],
+      16,['interpolate',['linear'],['get','price_amount'],100000,9,3000000,18],
+    ]);
+    map.setPaintProperty('properties-point','circle-stroke-color','#ffffff');
+    map.setPaintProperty('properties-point','circle-stroke-width',['interpolate',['linear'],['zoom'],9,1,15,2.5]);
+    map.setPaintProperty('properties-point','circle-opacity',0.92);
+  }
+
+  // Style price label — only show at zoom 13+ and apply same filter  
+  if (map.getLayer('properties-price-label')) {
+    map.setLayoutProperty('properties-price-label','text-field',[
+      'step',['zoom'],'',13,
+      ['concat','£',['to-string',['round',['/',[  'get','price_amount'],1000]]],'k']
+    ]);
+    map.setLayoutProperty('properties-price-label','text-size',['interpolate',['linear'],['zoom'],13,9,16,12]);
+    map.setLayoutProperty('properties-price-label','text-offset',[0,-1.5]);
+    map.setLayoutProperty('properties-price-label','text-anchor','bottom');
+    map.setLayoutProperty('properties-price-label','text-allow-overlap',false);
+    try { map.setLayoutProperty('properties-price-label','text-font',['Open Sans Semibold','Arial Unicode MS Bold']); } catch(e){}
+    map.setPaintProperty('properties-price-label','text-color','#0f172a');
+    map.setPaintProperty('properties-price-label','text-halo-color','rgba(255,255,255,0.95)');
+    map.setPaintProperty('properties-price-label','text-halo-width',2);
+  }
+
+  // Borough bubbles — heat by avg_price, sized by home_count
+  if (map.getLayer('boroughs-fill')) {
+    map.setPaintProperty('boroughs-fill','circle-color',[
+      'interpolate',['linear'],['get','avg_price'],
+      0,'rgba(16,185,129,0.18)', 400000,'rgba(251,191,36,0.22)', 800000,'rgba(249,115,22,0.25)', 1500000,'rgba(239,68,68,0.28)'
+    ]);
+    map.setPaintProperty('boroughs-fill','circle-radius',[
+      'interpolate',['linear'],['zoom'],
+      8,['interpolate',['linear'],['get','home_count'],0,16,5000,38],
+      11,['interpolate',['linear'],['get','home_count'],0,28,5000,65],
+    ]);
+    map.setPaintProperty('boroughs-fill','circle-stroke-color',[
+      'interpolate',['linear'],['get','avg_price'],
+      0,'rgba(16,185,129,0.55)', 400000,'rgba(251,191,36,0.55)', 800000,'rgba(249,115,22,0.6)', 1500000,'rgba(239,68,68,0.6)'
+    ]);
+    map.setPaintProperty('boroughs-fill','circle-stroke-width',1.5);
+    map.setPaintProperty('boroughs-fill','circle-opacity',['interpolate',['linear'],['zoom'],8,0.92,12,0.55,13,0]);
+  }
+
+  // Borough label: name + count
+  if (map.getLayer('boroughs-count-label')) {
+    map.setLayoutProperty('boroughs-count-label','text-field',[
+      'format',
+      ['get','name'],{'font-scale':0.78,'text-font':['literal',['Open Sans Bold','Arial Unicode MS Bold']]},
+      '\n',{},
+      ['concat',['to-string',['get','home_count']],' homes'],{'font-scale':0.68,'text-font':['literal',['Open Sans Regular','Arial Unicode MS Regular']]}
+    ]);
+    map.setLayoutProperty('boroughs-count-label','text-size',13);
+    map.setLayoutProperty('boroughs-count-label','text-offset',[0,0]);
+    map.setLayoutProperty('boroughs-count-label','text-anchor','center');
+    map.setPaintProperty('boroughs-count-label','text-color','#0f172a');
+    map.setPaintProperty('boroughs-count-label','text-halo-color','rgba(255,255,255,0.88)');
+    map.setPaintProperty('boroughs-count-label','text-halo-width',2.5);
+    map.setPaintProperty('boroughs-count-label','text-opacity',['interpolate',['linear'],['zoom'],8,1,12,0.8,13,0]);
+  }
+
+  // Borough click popup
+  map.on('click','boroughs-fill', e => {
+    const p = e.features[0].properties;
+    const avg = p.avg_price ? '£'+Number(p.avg_price).toLocaleString() : '—';
+    const html = `<div style="font-family:'DM Sans',sans-serif;padding:12px 14px;min-width:170px;">
+      <div style="font-weight:600;font-size:14px;color:#0f172a;margin-bottom:7px;">${p.name||'Borough'}</div>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <div style="display:flex;justify-content:space-between;gap:20px;font-size:12px;"><span style="color:#64748b;">Avg price</span><span style="font-weight:600;color:#0f172a;">${avg}</span></div>
+        <div style="display:flex;justify-content:space-between;gap:20px;font-size:12px;"><span style="color:#64748b;">Listings</span><span style="font-weight:600;color:#0f172a;">${Number(p.home_count||0).toLocaleString()}</span></div>
+      </div>
+    </div>`;
+    new maplibregl.Popup({maxWidth:'220px',offset:6,closeButton:false}).setLngLat(e.lngLat).setHTML(html).addTo(map);
+    e.stopPropagation();
+  });
+  map.on('mouseenter','boroughs-fill',()=>map.getCanvas().style.cursor='pointer');
+  map.on('mouseleave','boroughs-fill',()=>map.getCanvas().style.cursor='');
+
+  // Property click
+  map.on('click','properties-point', e => {
+    const props = e.features[0].properties;
+    const price = Number(props.price_amount);
+    const img = pickImg(e.lngLat.lng, e.lngLat.lat);
+    const sqft = props.size_sqft ? Number(props.size_sqft).toLocaleString()+' ft²' : null;
+
+    if (selPopup) { selPopup.remove(); selPopup = null; }
+
+    const html = `<div class="prop-pop">
+      <div class="pp-img-wrap">
+        <img class="pp-img" src="${img}" alt="Property" loading="lazy" onerror="this.parentElement.style.display='none'">
+        <span class="pp-badge">${props.property_sub_type||'Property'}</span>
+      </div>
+      <div class="pp-body">
+        <div class="pp-price">£${price.toLocaleString()}</div>
+        <div class="pp-chips">
+          <span class="pp-chip">
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 9V5.5L6 2l5 3.5V9"/><rect x="4" y="6" width="2" height="3" rx=".3"/><rect x="7" y="6" width="2" height="2" rx=".3"/></svg>
+            ${props.bedrooms||'?'} bed
+          </span>
+          <span class="pp-chip">
+            <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 8h10V6.5A1.5 1.5 0 0 0 9.5 5h-7A1.5 1.5 0 0 0 1 6.5V8z"/><path d="M3 8v1.5M9 8v1.5"/></svg>
+            ${props.bathrooms||'?'} bath
+          </span>
+          ${sqft?`<span class="pp-chip"><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="1" y="1" width="10" height="10" rx="1"/><path d="M4 1v10M1 4h10"/></svg>${sqft}</span>`:''}
+        </div>
+        <div class="pp-addr">${props.displayAddress||''}</div>
+      </div>
+    </div>`;
+
+    selPopup = new maplibregl.Popup({maxWidth:'268px',offset:14,closeOnClick:false})
+      .setLngLat(e.lngLat).setHTML(html).addTo(map);
+
+    // On popup close → reset tilt
+    selPopup.on('close', () => {
+      map.easeTo({ pitch:0, duration:700 });
+      selPopup = null;
+    });
+
+    map.easeTo({ center:e.lngLat, zoom:Math.max(map.getZoom(),16), pitch:70, duration:900 });
+    e.stopPropagation();
+  });
+
+  // Click empty map → close popup + reset tilt
+  map.on('click', () => {
+    if (selPopup) { selPopup.remove(); selPopup = null; map.easeTo({ pitch:0, duration:700 }); }
+  });
+
+  map.on('mouseenter','properties-point',()=>map.getCanvas().style.cursor='pointer');
+  map.on('mouseleave','properties-point',()=>map.getCanvas().style.cursor='');
+
+  // Auto tilt on zoom (only when no popup)
+  map.on('zoomend', () => {
+    if (selPopup) return;
+    const z = map.getZoom();
+    if (z >= 15) map.easeTo({ pitch:Math.min(((z-15)/3)*60,55), duration:500 });
+    else if (z < 13) map.easeTo({ pitch:0, duration:500 });
+  });
+
+  // Dismiss loading
+  setTimeout(() => {
+    const ls = document.getElementById('loading-scr');
+    if (ls) { ls.classList.add('out'); setTimeout(()=>ls.remove(),700); }
+  }, 2400);
+});
+
+setTimeout(() => {
+  const ls = document.getElementById('loading-scr');
+  if (ls) { ls.classList.add('out'); setTimeout(()=>ls.remove(),700); }
+}, 5000);
+
+// ── AI CHAT ──
+const AI_RES = [
+  "I found 2-bed flats under £600k in Zone 1. Best pockets: Bermondsey, Bethnal Green, Stepney Green. Shall I filter the map?",
+  "East London offers great value. Hackney, Walthamstow and Leyton average £450–550k for a 2-bed. Want to see those on the map?",
+  "For 4+ bed houses under £1.2M — Croydon, Lewisham and Bromley offer the most space per pound right now.",
+  "Based on your criteria I found 47 matching properties. Median price: £685k, mostly 2-bed flats in Zone 2–3.",
+  "That area has great transport links and highly-rated schools. Average commute to the City: 22 minutes by tube.",
+];
+let aiN = 0;
+
+function addMsg(txt, isUser) {
+  document.getElementById('ai-welcome')?.remove();
+  const msgs = document.getElementById('ai-msgs');
+  const w = document.createElement('div');
+  w.style.cssText = `display:flex;justify-content:${isUser?'flex-end':'flex-start'};`;
+  w.innerHTML = `<div class="mb ${isUser?'mb-u':'mb-a'}">${txt}</div>`;
+  msgs.appendChild(w);
+  document.getElementById('ai-body').scrollTop = 99999;
+}
+
+function addThinking() {
+  const msgs = document.getElementById('ai-msgs');
+  const w = document.createElement('div'); w.id='ai-thinking'; w.style.display='flex';
+  w.innerHTML = `<div class="mb mb-a"><span class="tdot"></span><span class="tdot"></span><span class="tdot"></span></div>`;
+  msgs.appendChild(w);
+  document.getElementById('ai-body').scrollTop = 99999;
+}
+
+function sendAI() {
+  const inp = document.getElementById('ai-inp');
+  const txt = inp.value.trim(); if (!txt) return;
+  addMsg(txt, true); inp.value = '';
+  addThinking();
+  setTimeout(() => {
+    document.getElementById('ai-thinking')?.remove();
+    addMsg(AI_RES[aiN++ % AI_RES.length], false);
+  }, 1100 + Math.random()*700);
+}
+
+function quickPrompt(btn) {
+  document.getElementById('ai-inp').value = btn.textContent; sendAI();
+}
+
+document.getElementById('ai-send').addEventListener('click', sendAI);
+document.getElementById('ai-inp').addEventListener('keydown', e => { if(e.key==='Enter') sendAI(); });
+</script>
+</body>
+</html>

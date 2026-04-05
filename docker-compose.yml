@@ -1,0 +1,36 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgis/postgis:17-3.5-alpine
+    container_name: realestate-postgis
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: realestate
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - ./london_boundaries.geojson:/data/london_boundaries.geojson:ro
+      - ./rightmove_properties_all_boroughs.csv:/data/rightmove_properties_all_boroughs.csv:ro
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db:/docker-entrypoint-initdb.d
+  
+  martin:
+    image: ghcr.io/maplibre/martin:latest
+    container_name: martin-tile-server
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # - ./data:/data:ro
+      - ./london.mbtiles:/data/london.mbtiles:ro
+      - ./martin-config.yaml:/config/martin-config.yaml:ro
+    command: --config /config/martin-config.yaml
+    # command: /data/london.mbtiles
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
